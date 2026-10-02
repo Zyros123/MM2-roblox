@@ -152,7 +152,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
---// Fling
+--// Fling (mucho más fuerte)
 local function flingPlayer(roleName)
     for _, plr in pairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and getRole(plr) == roleName then
@@ -160,15 +160,37 @@ local function flingPlayer(roleName)
             if char and char:FindFirstChild("HumanoidRootPart") then
                 local hrp = char.HumanoidRootPart
                 pcall(function()
-                    local bv = Instance.new("BodyVelocity")
-                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                    bv.Velocity = Vector3.new(0, 99999, 0) + (hrp.CFrame.LookVector * 50000)
-                    bv.Parent = hrp
-                    task.delay(0.3, function() if bv then bv:Destroy() end end)
-                end)
-                -- extra push
-                pcall(function()
-                    hrp.CFrame = hrp.CFrame + Vector3.new(0, 500, 0)
+                    -- Desactivar humanoid un momento
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    if hum then hum.PlatformStand = true end
+
+                    -- Varios empujones fuertes
+                    for i = 1, 8 do
+                        local bv = Instance.new("BodyVelocity")
+                        bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                        bv.P = 9e9
+                        bv.Velocity = Vector3.new(
+                            math.random(-1e6, 1e6),
+                            1e6,
+                            math.random(-1e6, 1e6)
+                        )
+                        bv.Parent = hrp
+
+                        local bg = Instance.new("BodyGyro")
+                        bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+                        bg.P = 9e9
+                        bg.Parent = hrp
+
+                        hrp.CFrame = hrp.CFrame + Vector3.new(0, 800, 0)
+                        hrp.AssemblyLinearVelocity = Vector3.new(0, 999999, 0)
+
+                        task.wait(0.05)
+                        bv:Destroy()
+                        bg:Destroy()
+                    end
+
+                    -- Último empujón final
+                    hrp.CFrame = CFrame.new(0, 50000, 0)
                 end)
             end
         end
@@ -266,19 +288,48 @@ end
 local function tpLobby()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local lobby = Workspace:FindFirstChild("Lobby")
-    if lobby then
-        char.HumanoidRootPart.CFrame = lobby:GetPivot() + Vector3.new(0, 5, 0)
-    else
-        char.HumanoidRootPart.CFrame = CFrame.new(0, 120, 0)
+    local hrp = char.HumanoidRootPart
+
+    -- Buscar partes reales del lobby
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            local n = v.Name:lower()
+            if n:find("lobby") or n:find("spawnpad") or n:find("votepad") or n:find("voting") then
+                hrp.CFrame = v.CFrame + Vector3.new(0, 4, 0)
+                return
+            end
+        end
     end
+
+    -- Fallback: modelo Lobby
+    local lobby = Workspace:FindFirstChild("Lobby") or Workspace:FindFirstChild("lobby")
+    if lobby then
+        hrp.CFrame = lobby:GetPivot() + Vector3.new(0, 5, 0)
+        return
+    end
+
+    -- Último recurso
+    hrp.CFrame = CFrame.new(hrp.Position.X, 150, hrp.Position.Z)
 end
 
 local function tpMap()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    -- generic map center-ish
-    char.HumanoidRootPart.CFrame = CFrame.new(0, 50, 0)
+    local hrp = char.HumanoidRootPart
+
+    -- Teleport cerca de otros jugadores que estén en el mapa
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+            local other = plr.Character.HumanoidRootPart
+            if other.Position.Y > 5 and other.Position.Y < 130 then
+                hrp.CFrame = other.CFrame + Vector3.new(math.random(-10, 10), 3, math.random(-10, 10))
+                return
+            end
+        end
+    end
+
+    -- Fallback: subir un poco desde donde estás
+    hrp.CFrame = hrp.CFrame + Vector3.new(0, 15, 0)
 end
 
 --// GUI
@@ -406,7 +457,7 @@ local function createGUI()
         b.MouseButton1Click:Connect(fn)
     end
 
-    local tabs = {"Visuals", "Sheriff", "Murderer", "Fling", "Utils", "Misc"}
+    local tabs = {"Visuals", "Sheriff Arm", "Murderer", "Fling", "Utils", "Misc"}
     local tabBtns = {}
 
     local function load(tab)
@@ -414,19 +465,33 @@ local function createGUI()
         if tab == "Visuals" then
             addToggle("Player ESP", "PlayerESP", 8)
             addToggle("Dropped Gun ESP", "GunESP", 40)
-        elseif tab == "Sheriff" then
+        elseif tab == "Sheriff Arm" then
             addToggle("Auto Grab Gun", "AutoGrabGun", 8)
             addToggle("Silent Aim (Fuerte)", "SilentAim", 40)
-            addBtn("Agarrar Arma Ahora", 80, function()
+            addBtn("Conseguir Arma (Innocent)", 80, function()
+                -- Intenta agarrar cualquier gun en el mapa + forzar
                 S.AutoGrabGun = true
                 handleGun()
-                task.delay(0.8, function() S.AutoGrabGun = false end)
+                -- También busca en el mapa y toca
+                for _, obj in pairs(Workspace:GetDescendants()) do
+                    if obj:IsA("Tool") and obj.Name == "Gun" and obj:FindFirstChild("Handle") then
+                        pcall(function()
+                            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                            if hrp then
+                                firetouchinterest(hrp, obj.Handle, 0)
+                                task.wait(0.05)
+                                firetouchinterest(hrp, obj.Handle, 1)
+                            end
+                        end)
+                    end
+                end
+                task.delay(1, function() S.AutoGrabGun = false end)
             end)
             local info = Instance.new("TextLabel")
-            info.Size = UDim2.new(1, -14, 0, 55)
+            info.Size = UDim2.new(1, -14, 0, 70)
             info.Position = UDim2.new(0, 7, 0, 120)
             info.BackgroundTransparency = 1
-            info.Text = "Si eres Innocent: activa Auto Grab o usa el botón cuando el Sheriff muera.\nSilent Aim: los tiros van directo al Murderer."
+            info.Text = "Si eres Innocent:\n1. Activa Silent Aim\n2. Usa 'Conseguir Arma' cuando el Sheriff muera\n3. Dispara y el tiro irá al Murderer"
             info.TextColor3 = Color3.fromRGB(130, 130, 150)
             info.Font = Enum.Font.Gotham
             info.TextSize = 11
@@ -436,13 +501,13 @@ local function createGUI()
         elseif tab == "Murderer" then
             addToggle("AutoStab", "AutoStab", 8)
         elseif tab == "Fling" then
-            addBtn("Fling Murderer", 10, function() flingPlayer("Murderer") end)
-            addBtn("Fling Sheriff", 45, function() flingPlayer("Sheriff") end)
+            addBtn("Fling Murderer (Fuerte)", 10, function() flingPlayer("Murderer") end)
+            addBtn("Fling Sheriff (Fuerte)", 45, function() flingPlayer("Sheriff") end)
             local info = Instance.new("TextLabel")
             info.Size = UDim2.new(1, -14, 0, 40)
             info.Position = UDim2.new(0, 7, 0, 90)
             info.BackgroundTransparency = 1
-            info.Text = "Manda al jugador a volar fuera del mapa."
+            info.Text = "Los manda MUY lejos del mapa de una sola vez."
             info.TextColor3 = Color3.fromRGB(130, 130, 150)
             info.Font = Enum.Font.Gotham
             info.TextSize = 11
