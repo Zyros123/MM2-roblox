@@ -154,43 +154,58 @@ end)
 
 --// Fling (mucho más fuerte)
 local function flingPlayer(roleName)
+    local myChar = LocalPlayer.Character
+    if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return end
+    local myHRP = myChar.HumanoidRootPart
+
     for _, plr in pairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and getRole(plr) == roleName then
             local char = getChar(plr)
             if char and char:FindFirstChild("HumanoidRootPart") then
                 local hrp = char.HumanoidRootPart
-                pcall(function()
-                    -- Desactivar humanoid un momento
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    if hum then hum.PlatformStand = true end
+                local hum = char:FindFirstChildOfClass("Humanoid")
 
-                    -- Varios empujones fuertes
-                    for i = 1, 8 do
+                pcall(function()
+                    -- 1. Traerlo y pegarlo a ti
+                    if hum then
+                        hum.PlatformStand = true
+                        hum:ChangeState(Enum.HumanoidStateType.Physics)
+                    end
+
+                    -- Acercarlo varias veces
+                    for i = 1, 6 do
+                        hrp.CFrame = myHRP.CFrame * CFrame.new(0, 0, -1.5)
+                        hrp.AssemblyLinearVelocity = Vector3.zero
+                        task.wait(0.03)
+                    end
+
+                    -- 2. Ahora lanzarlo con fuerza extrema
+                    for i = 1, 15 do
+                        hrp.CFrame = myHRP.CFrame * CFrame.new(0, 0, -1)
+                        
                         local bv = Instance.new("BodyVelocity")
                         bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                        bv.P = 9e9
                         bv.Velocity = Vector3.new(
+                            math.random(-2e5, 2e5),
+                            2e5,
+                            math.random(-2e5, 2e5)
+                        )
+                        bv.Parent = hrp
+
+                        hrp.AssemblyLinearVelocity = Vector3.new(
                             math.random(-1e6, 1e6),
                             1e6,
                             math.random(-1e6, 1e6)
                         )
-                        bv.Parent = hrp
+                        hrp.AssemblyAngularVelocity = Vector3.new(9e9, 9e9, 9e9)
 
-                        local bg = Instance.new("BodyGyro")
-                        bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-                        bg.P = 9e9
-                        bg.Parent = hrp
-
-                        hrp.CFrame = hrp.CFrame + Vector3.new(0, 800, 0)
-                        hrp.AssemblyLinearVelocity = Vector3.new(0, 999999, 0)
-
-                        task.wait(0.05)
+                        task.wait(0.04)
                         bv:Destroy()
-                        bg:Destroy()
                     end
 
-                    -- Último empujón final
-                    hrp.CFrame = CFrame.new(0, 50000, 0)
+                    -- Empujón final lejos
+                    hrp.CFrame = CFrame.new(math.random(-2000, 2000), 5000, math.random(-2000, 2000))
+                    hrp.AssemblyLinearVelocity = Vector3.new(0, 1e6, 0)
                 end)
             end
         end
