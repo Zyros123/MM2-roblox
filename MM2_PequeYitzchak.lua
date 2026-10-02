@@ -1,6 +1,6 @@
 --[[
     MM2 - peque yitzchak
-    Optimizado para Xeno + bajo lag
+    Optimizado + Get Gun + Silent Aim fuerte + Fling
 ]]
 
 local Players = game:GetService("Players")
@@ -12,7 +12,6 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
---// Settings
 local S = {
     PlayerESP = false,
     GunESP = false,
@@ -22,21 +21,17 @@ local S = {
     AutoCoins = false,
     Fly = false,
     Noclip = false,
-    FlySpeed = 45
+    FlySpeed = 50
 }
 
-local ESPFolder = Instance.new("Folder")
+local ESPFolder = Instance.new("Folder", CoreGui)
 ESPFolder.Name = "MM2ESP"
-ESPFolder.Parent = CoreGui
-
 local Highlights = {}
 local Flying = false
-local BV, BG
-local NoclipConn
-local LastCoin = 0
-local LastGun = 0
+local BV, BG, NoclipConn
+local LastCoin, LastGun = 0, 0
 
---// Roles
+--// Role helpers
 local function getRole(plr)
     if not plr or not plr.Character then return "Innocent" end
     local c, b = plr.Character, plr:FindFirstChild("Backpack")
@@ -51,35 +46,30 @@ local function roleColor(r)
     return Color3.fromRGB(60, 220, 60)
 end
 
---// ESP (optimizado)
+local function getChar(plr)
+    return plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character
+end
+
+--// ESP
 local function clearESP()
-    for _, h in pairs(Highlights) do
-        if h and h.Parent then h:Destroy() end
-    end
+    for _, h in pairs(Highlights) do if h and h.Parent then h:Destroy() end end
     table.clear(Highlights)
-    for _, v in pairs(ESPFolder:GetChildren()) do v:Destroy() end
 end
 
 local function updateESP()
-    if not S.PlayerESP then
-        clearESP()
-        return
-    end
-
+    if not S.PlayerESP then clearESP() return end
     for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+        if plr ~= LocalPlayer and getChar(plr) then
             local role = getRole(plr)
             local color = roleColor(role)
-
             if not Highlights[plr] or not Highlights[plr].Parent then
                 local h = Instance.new("Highlight")
-                h.FillTransparency = 0.65
+                h.FillTransparency = 0.6
                 h.OutlineTransparency = 0
                 h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
                 h.Parent = ESPFolder
                 Highlights[plr] = h
             end
-
             local h = Highlights[plr]
             h.Adornee = plr.Character
             h.FillColor = color
@@ -89,32 +79,27 @@ local function updateESP()
     end
 end
 
---// Gun ESP + Auto Grab (throttled)
+--// Gun handle
 local function handleGun()
-    local now = tick()
-    if now - LastGun < 0.4 then return end
-    LastGun = now
-
+    if tick() - LastGun < 0.35 then return end
+    LastGun = tick()
     for _, obj in pairs(Workspace:GetDescendants()) do
         if obj:IsA("Tool") and obj.Name == "Gun" then
-            -- ESP
             if S.GunESP and not obj:FindFirstChild("MM2GunHL") then
                 local h = Instance.new("Highlight")
                 h.Name = "MM2GunHL"
                 h.FillColor = Color3.fromRGB(255, 200, 0)
-                h.OutlineColor = Color3.fromRGB(255, 255, 100)
-                h.FillTransparency = 0.4
+                h.OutlineColor = Color3.fromRGB(255, 255, 80)
+                h.FillTransparency = 0.35
                 h.Adornee = obj
                 h.Parent = obj
             end
-
-            -- Auto Grab
             if S.AutoGrabGun and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
                 local handle = obj:FindFirstChild("Handle")
                 if handle then
                     pcall(function()
                         firetouchinterest(LocalPlayer.Character.HumanoidRootPart, handle, 0)
-                        task.wait(0.05)
+                        task.wait(0.03)
                         firetouchinterest(LocalPlayer.Character.HumanoidRootPart, handle, 1)
                     end)
                 end
@@ -123,44 +108,85 @@ local function handleGun()
     end
 end
 
---// Silent Aim
-local function getMurderer()
+--// Strong Silent Aim
+local function getMurdererRoot()
     for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and getRole(plr) == "Murderer" and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
-            local hum = plr.Character:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health > 0 then
-                return plr.Character.HumanoidRootPart
+        if plr ~= LocalPlayer and getRole(plr) == "Murderer" then
+            local char = getChar(plr)
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    return char.HumanoidRootPart
+                end
             end
         end
     end
 end
 
-local oldIndex
 pcall(function()
-    oldIndex = hookmetamethod(game, "__index", function(self, key)
-        if S.SilentAim and key == "Hit" and self == Mouse then
-            local target = getMurderer()
-            if target then
-                return target.Position
+    local old
+    old = hookmetamethod(game, "__index", function(self, key)
+        if S.SilentAim and not checkcaller() then
+            if key == "Hit" and self == Mouse then
+                local t = getMurdererRoot()
+                if t then return t.Position end
+            elseif key == "Target" and self == Mouse then
+                local t = getMurdererRoot()
+                if t then return t end
             end
         end
-        return oldIndex(self, key)
+        return old(self, key)
     end)
 end)
 
---// AutoStab (throttled)
+-- Also redirect camera slightly for better hit chance
+RunService.RenderStepped:Connect(function()
+    if S.SilentAim and LocalPlayer.Character and (LocalPlayer.Character:FindFirstChild("Gun") or LocalPlayer.Backpack:FindFirstChild("Gun")) then
+        local target = getMurdererRoot()
+        if target then
+            -- soft aim assist
+            local cam = Camera.CFrame
+            local dir = (target.Position - cam.Position).Unit
+            Camera.CFrame = CFrame.new(cam.Position, cam.Position + cam.LookVector:Lerp(dir, 0.15))
+        end
+    end
+end)
+
+--// Fling
+local function flingPlayer(roleName)
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and getRole(plr) == roleName then
+            local char = getChar(plr)
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local hrp = char.HumanoidRootPart
+                pcall(function()
+                    local bv = Instance.new("BodyVelocity")
+                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                    bv.Velocity = Vector3.new(0, 99999, 0) + (hrp.CFrame.LookVector * 50000)
+                    bv.Parent = hrp
+                    task.delay(0.3, function() if bv then bv:Destroy() end end)
+                end)
+                -- extra push
+                pcall(function()
+                    hrp.CFrame = hrp.CFrame + Vector3.new(0, 500, 0)
+                end)
+            end
+        end
+    end
+end
+
+--// AutoStab
 local function doStab()
     if not S.AutoStab or getRole(LocalPlayer) ~= "Murderer" then return end
-    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
-
-    local knife = LocalPlayer.Character:FindFirstChild("Knife") or LocalPlayer.Backpack:FindFirstChild("Knife")
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local knife = char:FindFirstChild("Knife") or LocalPlayer.Backpack:FindFirstChild("Knife")
     if not knife then return end
-
     for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
-            local dist = (plr.Character.HumanoidRootPart.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
-            if dist < 14 then
-                knife.Parent = LocalPlayer.Character
+        if plr ~= LocalPlayer and getChar(plr) then
+            local dist = (plr.Character.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
+            if dist < 15 then
+                knife.Parent = char
                 pcall(mouse1click)
                 break
             end
@@ -168,16 +194,12 @@ local function doStab()
     end
 end
 
---// Coins (throttled)
+--// Coins
 local function collectCoins()
-    if not S.AutoCoins then return end
-    local now = tick()
-    if now - LastCoin < 0.6 then return end
-    LastCoin = now
-
-    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = LocalPlayer.Character.HumanoidRootPart
-
+    if not S.AutoCoins or tick() - LastCoin < 0.5 then return end
+    LastCoin = tick()
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
     for _, obj in pairs(Workspace:GetDescendants()) do
         if obj.Name == "Coin" or (obj:IsA("BasePart") and obj.Name:lower():find("coin")) then
             pcall(function()
@@ -195,17 +217,13 @@ local function startFly()
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     Flying = true
     local hrp = char.HumanoidRootPart
-
     BV = Instance.new("BodyVelocity")
     BV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    BV.Velocity = Vector3.zero
     BV.Parent = hrp
-
     BG = Instance.new("BodyGyro")
     BG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
     BG.P = 9999
     BG.Parent = hrp
-
     char.Humanoid.PlatformStand = true
 end
 
@@ -221,23 +239,17 @@ end
 local function updateFly()
     if not Flying or not BV or not BG then return end
     local cam = Camera.CFrame
-    local move = Vector3.zero
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + cam.LookVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - cam.LookVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - cam.RightVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + cam.RightVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.new(0,1,0) end
-    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move = move + Vector3.new(0,-1,0) end
-
-    if move.Magnitude > 0 then
-        BV.Velocity = move.Unit * S.FlySpeed
-    else
-        BV.Velocity = Vector3.zero
-    end
+    local m = Vector3.zero
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then m = m + cam.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then m = m - cam.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then m = m - cam.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then m = m + cam.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then m = m + Vector3.new(0,1,0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then m = m + Vector3.new(0,-1,0) end
+    BV.Velocity = m.Magnitude > 0 and m.Unit * S.FlySpeed or Vector3.zero
     BG.CFrame = cam
 end
 
---// Noclip
 local function setNoclip(on)
     if NoclipConn then NoclipConn:Disconnect() NoclipConn = nil end
     if on then
@@ -251,7 +263,6 @@ local function setNoclip(on)
     end
 end
 
---// Teleport Lobby
 local function tpLobby()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
@@ -263,7 +274,14 @@ local function tpLobby()
     end
 end
 
---// GUI (ligera + minimizable)
+local function tpMap()
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    -- generic map center-ish
+    char.HumanoidRootPart.CFrame = CFrame.new(0, 50, 0)
+end
+
+--// GUI
 local function createGUI()
     local sg = Instance.new("ScreenGui")
     sg.Name = "MM2_PY"
@@ -272,41 +290,37 @@ local function createGUI()
     pcall(function() sg.Parent = CoreGui end)
     if not sg.Parent then sg.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-    -- Mini button
     local Mini = Instance.new("TextButton")
-    Mini.Name = "MiniBtn"
-    Mini.Size = UDim2.new(0, 42, 0, 42)
-    Mini.Position = UDim2.new(0, 15, 0.5, -21)
-    Mini.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+    Mini.Size = UDim2.new(0, 44, 0, 44)
+    Mini.Position = UDim2.new(0, 12, 0.5, -22)
+    Mini.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
     Mini.Text = "MM2"
-    Mini.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Mini.TextColor3 = Color3.new(1,1,1)
     Mini.Font = Enum.Font.GothamBold
-    Mini.TextSize = 11
+    Mini.TextSize = 12
     Mini.Visible = false
     Mini.Parent = sg
     Instance.new("UICorner", Mini).CornerRadius = UDim.new(0, 10)
 
-    -- Main Frame
     local Main = Instance.new("Frame")
-    Main.Size = UDim2.new(0, 420, 0, 300)
-    Main.Position = UDim2.new(0.5, -210, 0.5, -150)
-    Main.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+    Main.Size = UDim2.new(0, 430, 0, 320)
+    Main.Position = UDim2.new(0.5, -215, 0.5, -160)
+    Main.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
     Main.BorderSizePixel = 0
     Main.Active = true
     Main.Draggable = true
     Main.Parent = sg
     Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
 
-    -- Sidebar
     local Side = Instance.new("Frame")
-    Side.Size = UDim2.new(0, 130, 1, 0)
-    Side.BackgroundColor3 = Color3.fromRGB(14, 14, 18)
+    Side.Size = UDim2.new(0, 125, 1, 0)
+    Side.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
     Side.BorderSizePixel = 0
     Side.Parent = Main
     Instance.new("UICorner", Side).CornerRadius = UDim.new(0, 10)
 
     local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1, 0, 0, 28)
+    Title.Size = UDim2.new(1, 0, 0, 26)
     Title.BackgroundTransparency = 1
     Title.Text = "MM2"
     Title.TextColor3 = Color3.new(1,1,1)
@@ -316,34 +330,31 @@ local function createGUI()
 
     local Sub = Instance.new("TextLabel")
     Sub.Size = UDim2.new(1, 0, 0, 16)
-    Sub.Position = UDim2.new(0, 0, 0, 26)
+    Sub.Position = UDim2.new(0, 0, 0, 24)
     Sub.BackgroundTransparency = 1
     Sub.Text = "peque yitzchak"
-    Sub.TextColor3 = Color3.fromRGB(130, 130, 150)
+    Sub.TextColor3 = Color3.fromRGB(120, 120, 140)
     Sub.Font = Enum.Font.Gotham
     Sub.TextSize = 11
     Sub.Parent = Side
 
-    -- Content
     local Content = Instance.new("Frame")
-    Content.Size = UDim2.new(1, -140, 1, -15)
-    Content.Position = UDim2.new(0, 135, 0, 8)
+    Content.Size = UDim2.new(1, -135, 1, -12)
+    Content.Position = UDim2.new(0, 130, 0, 6)
     Content.BackgroundTransparency = 1
     Content.Parent = Main
 
-    local function clear()
-        for _, v in pairs(Content:GetChildren()) do v:Destroy() end
-    end
+    local function clear() for _, v in pairs(Content:GetChildren()) do v:Destroy() end end
 
     local function addToggle(txt, key, y)
         local f = Instance.new("Frame")
-        f.Size = UDim2.new(1, -8, 0, 30)
+        f.Size = UDim2.new(1, -8, 0, 28)
         f.Position = UDim2.new(0, 4, 0, y)
         f.BackgroundTransparency = 1
         f.Parent = Content
 
         local l = Instance.new("TextLabel")
-        l.Size = UDim2.new(0.7, 0, 1, 0)
+        l.Size = UDim2.new(0.68, 0, 1, 0)
         l.BackgroundTransparency = 1
         l.Text = txt
         l.TextColor3 = Color3.fromRGB(210, 210, 220)
@@ -353,15 +364,15 @@ local function createGUI()
         l.Parent = f
 
         local bg = Instance.new("Frame")
-        bg.Size = UDim2.new(0, 36, 0, 20)
-        bg.Position = UDim2.new(1, -42, 0.5, -10)
-        bg.BackgroundColor3 = S[key] and Color3.fromRGB(70, 160, 255) or Color3.fromRGB(45, 45, 55)
+        bg.Size = UDim2.new(0, 34, 0, 18)
+        bg.Position = UDim2.new(1, -40, 0.5, -9)
+        bg.BackgroundColor3 = S[key] and Color3.fromRGB(70, 150, 255) or Color3.fromRGB(40, 40, 50)
         bg.Parent = f
         Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
 
         local c = Instance.new("Frame")
-        c.Size = UDim2.new(0, 16, 0, 16)
-        c.Position = S[key] and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+        c.Size = UDim2.new(0, 14, 0, 14)
+        c.Position = S[key] and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
         c.BackgroundColor3 = Color3.new(1,1,1)
         c.Parent = bg
         Instance.new("UICorner", c).CornerRadius = UDim.new(1, 0)
@@ -371,27 +382,21 @@ local function createGUI()
         btn.BackgroundTransparency = 1
         btn.Text = ""
         btn.Parent = f
-
         btn.MouseButton1Click:Connect(function()
             S[key] = not S[key]
-            bg.BackgroundColor3 = S[key] and Color3.fromRGB(70, 160, 255) or Color3.fromRGB(45, 45, 55)
-            c.Position = S[key] and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-
-            if key == "PlayerESP" then
-                if S.PlayerESP then updateESP() else clearESP() end
-            elseif key == "Fly" then
-                if S.Fly then startFly() else stopFly() end
-            elseif key == "Noclip" then
-                setNoclip(S.Noclip)
-            end
+            bg.BackgroundColor3 = S[key] and Color3.fromRGB(70, 150, 255) or Color3.fromRGB(40, 40, 50)
+            c.Position = S[key] and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+            if key == "PlayerESP" then if S.PlayerESP then updateESP() else clearESP() end end
+            if key == "Fly" then if S.Fly then startFly() else stopFly() end end
+            if key == "Noclip" then setNoclip(S.Noclip) end
         end)
     end
 
     local function addBtn(txt, y, fn)
         local b = Instance.new("TextButton")
-        b.Size = UDim2.new(1, -16, 0, 28)
-        b.Position = UDim2.new(0, 8, 0, y)
-        b.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        b.Size = UDim2.new(1, -14, 0, 26)
+        b.Position = UDim2.new(0, 7, 0, y)
+        b.BackgroundColor3 = Color3.fromRGB(32, 32, 42)
         b.Text = txt
         b.TextColor3 = Color3.fromRGB(220, 220, 230)
         b.Font = Enum.Font.Gotham
@@ -401,51 +406,64 @@ local function createGUI()
         b.MouseButton1Click:Connect(fn)
     end
 
-    local tabs = {"Visuals", "Sheriff", "Murderer", "Utils", "Coins", "Misc"}
+    local tabs = {"Visuals", "Sheriff", "Murderer", "Fling", "Utils", "Misc"}
     local tabBtns = {}
 
     local function load(tab)
         clear()
         if tab == "Visuals" then
-            addToggle("Player ESP", "PlayerESP", 10)
-            addToggle("Dropped Gun ESP", "GunESP", 45)
+            addToggle("Player ESP", "PlayerESP", 8)
+            addToggle("Dropped Gun ESP", "GunESP", 40)
         elseif tab == "Sheriff" then
-            addToggle("Auto Grab Gun", "AutoGrabGun", 10)
-            addToggle("Silent Aim (Murderer)", "SilentAim", 45)
-            addBtn("Agarrar Arma Ahora", 90, function()
+            addToggle("Auto Grab Gun", "AutoGrabGun", 8)
+            addToggle("Silent Aim (Fuerte)", "SilentAim", 40)
+            addBtn("Agarrar Arma Ahora", 80, function()
                 S.AutoGrabGun = true
                 handleGun()
-                task.wait(0.5)
-                S.AutoGrabGun = false
+                task.delay(0.8, function() S.AutoGrabGun = false end)
             end)
             local info = Instance.new("TextLabel")
-            info.Size = UDim2.new(1, -16, 0, 50)
-            info.Position = UDim2.new(0, 8, 0, 130)
+            info.Size = UDim2.new(1, -14, 0, 55)
+            info.Position = UDim2.new(0, 7, 0, 120)
             info.BackgroundTransparency = 1
-            info.Text = "Silent Aim: con el arma, los tiros van al Murderer.\nAuto Grab: recoge el arma cuando cae."
-            info.TextColor3 = Color3.fromRGB(140, 140, 160)
+            info.Text = "Si eres Innocent: activa Auto Grab o usa el botón cuando el Sheriff muera.\nSilent Aim: los tiros van directo al Murderer."
+            info.TextColor3 = Color3.fromRGB(130, 130, 150)
             info.Font = Enum.Font.Gotham
             info.TextSize = 11
             info.TextWrapped = true
             info.TextXAlignment = Enum.TextXAlignment.Left
             info.Parent = Content
         elseif tab == "Murderer" then
-            addToggle("AutoStab", "AutoStab", 10)
+            addToggle("AutoStab", "AutoStab", 8)
+        elseif tab == "Fling" then
+            addBtn("Fling Murderer", 10, function() flingPlayer("Murderer") end)
+            addBtn("Fling Sheriff", 45, function() flingPlayer("Sheriff") end)
+            local info = Instance.new("TextLabel")
+            info.Size = UDim2.new(1, -14, 0, 40)
+            info.Position = UDim2.new(0, 7, 0, 90)
+            info.BackgroundTransparency = 1
+            info.Text = "Manda al jugador a volar fuera del mapa."
+            info.TextColor3 = Color3.fromRGB(130, 130, 150)
+            info.Font = Enum.Font.Gotham
+            info.TextSize = 11
+            info.TextWrapped = true
+            info.TextXAlignment = Enum.TextXAlignment.Left
+            info.Parent = Content
         elseif tab == "Utils" then
             addBtn("Teleport Lobby", 10, tpLobby)
-        elseif tab == "Coins" then
-            addToggle("Auto Coins", "AutoCoins", 10)
+            addBtn("Teleport Mapa", 45, tpMap)
+            addToggle("Auto Coins", "AutoCoins", 85)
         elseif tab == "Misc" then
-            addToggle("Fly", "Fly", 10)
-            addToggle("Noclip", "Noclip", 45)
+            addToggle("Fly", "Fly", 8)
+            addToggle("Noclip", "Noclip", 40)
         end
     end
 
     for i, name in ipairs(tabs) do
         local b = Instance.new("TextButton")
-        b.Size = UDim2.new(1, -14, 0, 28)
-        b.Position = UDim2.new(0, 7, 0, 50 + (i-1)*32)
-        b.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+        b.Size = UDim2.new(1, -12, 0, 26)
+        b.Position = UDim2.new(0, 6, 0, 48 + (i-1)*30)
+        b.BackgroundColor3 = Color3.fromRGB(26, 26, 34)
         b.Text = "  " .. name
         b.TextColor3 = Color3.fromRGB(200, 200, 215)
         b.Font = Enum.Font.Gotham
@@ -453,25 +471,23 @@ local function createGUI()
         b.TextXAlignment = Enum.TextXAlignment.Left
         b.Parent = Side
         Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-
         b.MouseButton1Click:Connect(function()
-            for _, tb in pairs(tabBtns) do tb.BackgroundColor3 = Color3.fromRGB(28, 28, 36) end
-            b.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
+            for _, tb in pairs(tabBtns) do tb.BackgroundColor3 = Color3.fromRGB(26, 26, 34) end
+            b.BackgroundColor3 = Color3.fromRGB(42, 42, 58)
             load(name)
         end)
         tabBtns[name] = b
     end
 
-    tabBtns["Visuals"].BackgroundColor3 = Color3.fromRGB(45, 45, 60)
+    tabBtns["Visuals"].BackgroundColor3 = Color3.fromRGB(42, 42, 58)
     load("Visuals")
 
-    -- Minimize / Close
     local MinBtn = Instance.new("TextButton")
     MinBtn.Size = UDim2.new(0, 26, 0, 26)
-    MinBtn.Position = UDim2.new(1, -55, 0, 6)
+    MinBtn.Position = UDim2.new(1, -54, 0, 5)
     MinBtn.BackgroundTransparency = 1
     MinBtn.Text = "–"
-    MinBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    MinBtn.TextColor3 = Color3.fromRGB(190, 190, 190)
     MinBtn.Font = Enum.Font.GothamBold
     MinBtn.TextSize = 18
     MinBtn.Parent = Main
@@ -482,23 +498,20 @@ local function createGUI()
 
     local Close = Instance.new("TextButton")
     Close.Size = UDim2.new(0, 26, 0, 26)
-    Close.Position = UDim2.new(1, -28, 0, 6)
+    Close.Position = UDim2.new(1, -28, 0, 5)
     Close.BackgroundTransparency = 1
     Close.Text = "×"
-    Close.TextColor3 = Color3.fromRGB(200, 200, 200)
+    Close.TextColor3 = Color3.fromRGB(190, 190, 190)
     Close.Font = Enum.Font.GothamBold
     Close.TextSize = 18
     Close.Parent = Main
-    Close.MouseButton1Click:Connect(function()
-        sg.Enabled = false
-    end)
+    Close.MouseButton1Click:Connect(function() sg.Enabled = false end)
 
     Mini.MouseButton1Click:Connect(function()
         Main.Visible = true
         Mini.Visible = false
     end)
 
-    -- RightShift toggle
     UserInputService.InputBegan:Connect(function(inp, gpe)
         if gpe then return end
         if inp.KeyCode == Enum.KeyCode.RightShift then
@@ -514,14 +527,13 @@ local function createGUI()
     end)
 end
 
---// Main
+--// Start
 createGUI()
-print("MM2 | peque yitzchak | Loaded (Optimized)")
+print("Loaded! | MM2 - peque yitzchak")
 
--- Loops optimizados (no cada frame)
 task.spawn(function()
     while true do
-        task.wait(0.35)
+        task.wait(0.3)
         if S.PlayerESP then updateESP() end
         handleGun()
         if S.AutoStab then doStab() end
